@@ -1,4 +1,6 @@
 library(RPostgreSQL)
+library(chron)
+library(stringr)
 #library(data.table)
 
 drv <- dbDriver("PostgreSQL")
@@ -9,7 +11,16 @@ con <- dbConnect(drv, dbname = "diadema_pilot_2018_all_data",
 focalData 	<- dbGetQuery(con, "SELECT * from main_tables.all_focal_data_view_edited")
 scanData	<- dbGetQuery(con, "SELECT * from main_tables.all_scan_data_view")
 
-listFocals	<- unique(focalData$focal_start_time)
+focal_start_str	<- data.frame(str_split_fixed(as.character(focalData$focal_start_time), ' ', n = 2))
+colnames(focal_start_str)	<- c('focal_date', 'focal_time')
+focal_start_chron	<- chron(dates. = as.character(focal_start_str$focal_date), times. = as.character(focal_start_str$focal_time),
+	format = c(dates = 'y-m-d', times = 'h:m:s'))
+behavior_time_str	<- data.frame(str_split_fixed(as.character(focalData$behavior_time), ' ', n = 2))
+colnames(behavior_time_str)	<- c('behav_date', 'behav_time')
+behavior_time_chron	<- chron(dates. = as.character(behavior_time_str$behav_date), times. = as.character(behavior_time_str$behav_time),
+	format = c(dates = 'y-m-d', times = 'h:m:s'))
+focalData$focal_start_chron	<- focal_start_chron
+focalData$behavior_time_chron	<- behavior_time_chron
 
 cleanedData	<- data.frame()
 errorFile	<- data.frame()
@@ -19,7 +30,7 @@ seperateFocals	<- function(data, startTime){
 	### data is a data.frame of inputted data
 	### startTime is the start time of the focal
 	### returns a data.frame from just that day
-	return(data[data$focal_start_time == startTime,])
+	return(data[data$focal_start_chron == startTime,])
 }
 
 createID	<- function(vector){
@@ -32,8 +43,7 @@ createID	<- function(vector){
 dyadIDs	<- apply(as.matrix(focalData[, c('actor', 'subject')]), 1, createID)
 focalDataID	<- cbind(focalData, dyadIDs)
 
-test	<- seperateFocals(focalDataID, listFocals[2])
-test2	<- seperateFocals(focalDataID, listFocals[180])[c(1, 4, 5:30),] #A file with (created) problems
+focalDataNoNA	<- focalDataID[is.na(focalDataID$actor) == FALSE,]
 
 cleanData	<- function(data, cleanFile, errorFile){
 	### This function takes a dataset (data), an cleanedFile (can be empty), an error file (can be empty)
@@ -48,11 +58,11 @@ cleanData	<- function(data, cleanFile, errorFile){
 		#print(head(sub))
 		if(sub$start_stop[1] == '1' | sub$start_stop[1] == 'Event'){ #Event
 			#print(paste(i, 'is an event'))
-			startTime	<- as.POSIXct(sub$behavior_time, format="%Y-%m-%d %H:%M:%S")
+			startTime	<- sub$behavior_time_chron
 			#print(startTime)
-			stopTime	<- as.POSIXct(sub$behavior_time, format="%Y-%m-%d %H:%M:%S")
+			stopTime	<- sub$behavior_time_chron
 			#print(stopTime)
-			duration	<- stopTime - startTime
+			duration	<- as.numeric(stopTime - startTime)*24*60*60
 			cleanedChunk	<- cbind(sub, startTime, stopTime, duration)
 			cleanFile	<- rbind(cleanFile, cleanedChunk)
 			#print(cleanFile[,c('behavior_time', 'behavior', 'tree_number', 'dyadIDs', 'startTime', 'stopTime', 'duration')])
@@ -71,11 +81,11 @@ cleanData	<- function(data, cleanFile, errorFile){
 						subTree	<- subTree[order(subTree$behavior_time),]
 						for(m in 1:(dim(subTree)[1]/2)){ #Take the start lines and use those, and add stop lines as stop time
 							cleanedLine	<- subTree[c(2*m - 1),]
-							startTime	<- as.POSIXct(subTree[c(2*m - 1),]$behavior_time, format="%Y-%m-%d %H:%M:%S")
+							startTime	<- subTree[c(2*m - 1),]$behavior_time_chron
 							#print(startTime)
-							stopTime	<- as.POSIXct(subTree[c(2*m),]$behavior_time, format="%Y-%m-%d %H:%M:%S")
+							stopTime	<- subTree[c(2*m),]$behavior_time_chron
 							#print(stopTime)
-							duration	<- stopTime - startTime
+							duration	<- as.numeric(stopTime - startTime)*24*60*60
 							cleanedLine	<- cbind(cleanedLine, startTime, stopTime, duration)
 							cleanFile	<- rbind(cleanFile, cleanedLine)
 						}
@@ -107,11 +117,11 @@ cleanData	<- function(data, cleanFile, errorFile){
 						subDyad	<- subDyad[order(subDyad$behavior_time),]
 						for(m in 1:(dim(subDyad)[1]/2)){
 							cleanedLine	<- subDyad[c(2*m - 1),]
-							startTime	<- as.POSIXct(subDyad[c(2*m - 1),]$behavior_time, format="%Y-%m-%d %H:%M:%S")
+							startTime	<- subDyad[c(2*m - 1),]$behavior_time_chron
 							#print(startTime)
-							stopTime	<- as.POSIXct(subDyad[c(2*m),]$behavior_time, format="%Y-%m-%d %H:%M:%S")
+							stopTime	<- subDyad[c(2*m),]$behavior_time_chron
 							#print(stopTime)
-							duration	<- stopTime - startTime
+							duration	<- as.numeric(stopTime - startTime)*24*60*60
 							cleanedLine	<- cbind(cleanedLine, startTime, stopTime, duration)
 							cleanFile	<- rbind(cleanFile, cleanedLine)
 						}
@@ -136,6 +146,7 @@ cleanData	<- function(data, cleanFile, errorFile){
 	return(list(cleanFile, errorFile))
 }
 
+listFocals	<- unique(focalDataID$focal_start_chron)
 cleanedTest	<- cleanData(test, cleanedData, errorFile)
 
 cleanAllFocalData	<- function(data, cleanFile, errorFile){
@@ -143,15 +154,18 @@ cleanAllFocalData	<- function(data, cleanFile, errorFile){
 	### Data is a dataset from AO (can contain multiple focals of data)
 	### cleanFile is a blank data.frame
 	### errorFile is a blank data.frame
-	listFocals	<- unique(data$focal_start_time)
+	listFocals	<- unique(data$focal_start_chron)
 	for(i in 1:length(listFocals)){
+		#print(paste('Beginning to clean', listFocals[i]))
 		focalData	<- seperateFocals(data, listFocals[i])
+		#print(paste(dim(focalData)[1], 'lines of data'))
 		if(i == 1){
 			output		<- cleanData(focalData, cleanFile, errorFile)
 		}
 		else{
-			output		<- cleanData(focalData, output[1][[1]], output[2][[1]])
+			output		<- cleanData(focalData, output[[1]], output[[2]])
 		}
+		print(paste(listFocals[i], 'has been cleaned'))
 	}
 	return(output)
 }
