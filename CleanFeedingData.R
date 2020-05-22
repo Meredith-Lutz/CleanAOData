@@ -3,7 +3,7 @@ library(chron)
 library(stringr)
 #library(data.table)
 
-setwd('G:/My Drive/Graduate School/Research/Projects/ReconciliationSDB')
+setwd('G:/My Drive/Graduate School/Research/Projects/TemporalNets')
 
 drv <- dbDriver("PostgreSQL")
 con <- dbConnect(drv, dbname = "diadema_fulvus",
@@ -47,7 +47,8 @@ focalDataID	<- cbind(focalData, dyadIDs)
 
 focalDataNoNA	<- focalDataID[is.na(focalDataID$actor) == FALSE,]
 
-sdb		<- focalDataNoNA[focalDataNoNA$behavior == 'Self groom' | focalDataNoNA$behavior == 'Scratch',]
+feeding		<- focalDataNoNA[focalDataNoNA$behavior == 'Feeding',]
+feedingNoOdilon	<- feeding[feeding$pin_code_name != 'Odilon',]
 
 cleanData	<- function(data, cleanFile, errorFile){
 	### This function takes a dataset (data), an cleanedFile (can be empty), an error file (can be empty)
@@ -55,58 +56,45 @@ cleanData	<- function(data, cleanFile, errorFile){
 	### For behaviors without stop/start, these lines go straight to clean file (duration = 0)
 	### For behaviors with start/stop, these lines are matched and then duration is calculated
 	### If there is no match, then they go to an error file
-	behaviors	<- unique(data$behavior)
+	foods		<- unique(data$part_eaten)
 	#print(behaviors)
-	for(i in behaviors){
-		sub	<- data[data$behavior == i,]
+	for(i in foods){
+		sub	<- data[data$part_eaten == i,]
 		#print(head(sub))
-		if(is.na(sub$start_stop[1]) == TRUE){ #Event
-			#print(paste(i, 'is an event'))
-			startTime	<- sub$behavior_time_chron
-			#print(startTime)
-			stopTime	<- sub$behavior_time_chron
-			#print(stopTime)
-			duration	<- as.numeric(stopTime - startTime)*24*60*60
-			cleanedChunk	<- cbind(sub, startTime, stopTime, duration)
-			cleanFile	<- rbind(cleanFile, cleanedChunk)
-			#print(cleanFile[,c('behavior_time', 'behavior', 'tree_number', 'dyadIDs', 'startTime', 'stopTime', 'duration')])
-		}
-		else{
-			nStart	<- dim(sub[sub$start_stop == 'Start',])[1]
-			nStop		<- dim(sub[sub$start_stop == 'Stop',])[1]
-			if(nStart == nStop){ #Everything is started and stopped
-				#print(paste(k, 'was started/stopped appropriately'))
-				sub	<- sub[order(sub$behavior_time),]
-				for(m in 1:(dim(sub)[1]/2)){
-					cleanedLine	<- sub[c(2*m - 1),]
-					startTime	<- sub[c(2*m - 1),]$behavior_time_chron
-					#print(startTime)
-					stopTime	<- sub[c(2*m),]$behavior_time_chron
-					#print(stopTime)
-					duration	<- as.numeric(stopTime - startTime)*24*60*60
-					cleanedLine	<- cbind(cleanedLine, startTime, stopTime, duration)
-					cleanFile	<- rbind(cleanFile, cleanedLine)
-				}
-			}
-			if(nStart > nStop){
-				#print(paste(k, 'has more starts than stops'))
-				errorCode	<- rep(1, length = dim(sub)[1])
-				errorChunk	<- cbind(sub, errorCode)
-				errorFile	<- rbind(errorFile, errorChunk)	
-			}
-			if(nStop > nStart){
-				#print(paste(k, 'has more stops than starts'))
-				errorCode	<- rep(2, length = dim(sub)[1])
-				errorChunk	<- cbind(sub, errorCode)
-				errorFile	<- rbind(errorFile, errorChunk)		
+		nStart	<- dim(sub[sub$start_stop == 'Start',])[1]
+		nStop		<- dim(sub[sub$start_stop == 'Stop',])[1]
+		if(nStart == nStop){ #Everything is started and stopped
+			#print(paste(k, 'was started/stopped appropriately'))
+			sub	<- sub[order(sub$behavior_time),]
+			for(m in 1:(dim(sub)[1]/2)){
+				cleanedLine	<- sub[c(2*m - 1),]
+				startTime	<- sub[c(2*m - 1),]$behavior_time_chron
+				#print(startTime)
+				stopTime	<- sub[c(2*m),]$behavior_time_chron
+				#print(stopTime)
+				duration	<- as.numeric(stopTime - startTime)*24*60*60
+				cleanedLine	<- cbind(cleanedLine, startTime, stopTime, duration)
+				cleanFile	<- rbind(cleanFile, cleanedLine)
 			}
 		}
-	#print(cleanFile[,c('behavior_time', 'behavior', 'tree_number', 'dyadIDs', 'startTime', 'stopTime', 'duration')])
+		if(nStart > nStop){
+			#print(paste(k, 'has more starts than stops'))
+			errorCode	<- rep(1, length = dim(sub)[1])
+			errorChunk	<- cbind(sub, errorCode)
+			errorFile	<- rbind(errorFile, errorChunk)	
+		}
+		if(nStop > nStart){
+			#print(paste(k, 'has more stops than starts'))
+			errorCode	<- rep(2, length = dim(sub)[1])
+			errorChunk	<- cbind(sub, errorCode)
+			errorFile	<- rbind(errorFile, errorChunk)		
+		}
 	}
+	#print(cleanFile[,c('behavior_time', 'behavior', 'tree_number', 'dyadIDs', 'startTime', 'stopTime', 'duration')])
 	return(list(cleanFile, errorFile))
 }
 
-listFocals	<- unique(focalDataID$focal_start_chron)
+listFocals	<- unique(feedingNoOdilon$focal_start_chron)
 cleanedTest	<- cleanData(test, cleanedData, errorFile)
 
 cleanAllFocalData	<- function(data, cleanFile, errorFile){
@@ -130,6 +118,6 @@ cleanAllFocalData	<- function(data, cleanFile, errorFile){
 	return(output)
 }
 
-allSDB	<- cleanAllFocalData(sdb, cleanedData, errorFile)
+feedingCleaned	<- cleanAllFocalData(feedingNoOdilon, cleanedData, errorFile)
 dbDisconnect(con)
 dbUnloadDriver(drv)
