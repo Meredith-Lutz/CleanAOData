@@ -131,5 +131,8 @@ cleanAllFocalData	<- function(data, cleanFile, errorFile){
 }
 
 allSDB	<- cleanAllFocalData(sdb, cleanedData, errorFile)
+
+clean		<- allSDB[[1]]
+cleanedFinal	<- clean[clean$pin_code_name == 'Meredith' | clean$pin_code_name == 'Hasina',]
 dbDisconnect(con)
 dbUnloadDriver(drv)

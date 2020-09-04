@@ -1,38 +1,3 @@
-library(RPostgreSQL)
-library(chron)
-library(stringr)
-#library(data.table)
-
-setwd('G:/My Drive/Graduate School/Research/Projects/TemporalNets')
-
-drv <- dbDriver("PostgreSQL")
-con <- dbConnect(drv, dbname = "diadema_fulvus",
-                 host = "localhost", port = 5432,
-                 user = "postgres", password = "postgres")
-
-focalData 	<- dbGetQuery(con, "SELECT * from main_tables.all_focal_data_view")
-scanData	<- dbGetQuery(con, "SELECT * from main_tables.all_scan_data_view")
-
-focal_start_str	<- data.frame(str_split_fixed(as.character(focalData$focal_start_time), ' ', n = 2))
-colnames(focal_start_str)	<- c('focal_date', 'focal_time')
-focal_start_chron	<- chron(dates. = as.character(focal_start_str$focal_date), times. = as.character(focal_start_str$focal_time),
-	format = c(dates = 'y-m-d', times = 'h:m:s'))
-behavior_time_str	<- data.frame(str_split_fixed(as.character(focalData$behavior_time), ' ', n = 2))
-colnames(behavior_time_str)	<- c('behav_date', 'behav_time')
-behavior_time_chron	<- chron(dates. = as.character(behavior_time_str$behav_date), times. = as.character(behavior_time_str$behav_time),
-	format = c(dates = 'y-m-d', times = 'h:m:s'))
-focalData$focal_start_chron	<- focal_start_chron
-focalData$behavior_time_chron	<- behavior_time_chron
-
-treeNumeral	<- data.frame(str_split_fixed(as.character(focalData$tree_number), ' ', n = 2))
-uniqueTrees	<- treeNumeral[!duplicated(treeNumeral),]
-write.csv(uniqueTrees, 'usedTrees.csv')
-
-cleanedData	<- data.frame()
-errorFile	<- data.frame()
-
-missingTrees	<- focalData[is.na(focalData$tree_number) == TRUE & focalData$behavior == 'Play' & focalData$ground == 'N' & focalData$start_stop == 'Start',]
-
 seperateFocals	<- function(data, startTime){
 	### This function breaks a data.frame up into seperate data sets for each focal
 	### data is a data.frame of inputted data
@@ -47,18 +12,6 @@ createID	<- function(vector){
 	id	<- paste(sort(vector), collapse = '')
 	return(id)
 }
-
-dyadIDs	<- apply(as.matrix(focalData[, c('actor', 'subject')]), 1, createID)
-focalDataID	<- cbind(focalData, dyadIDs)
-
-focalDataNoNA	<- focalDataID[is.na(focalDataID$actor) == FALSE,]
-social	<- focalDataNoNA[is.na(focalDataNoNA$category) == FALSE,]
-affil		<- social[social$category == 'Affilative' & social$pin_code_name != 'Odilon',]
-agg		<- social[social$category == 'Aggressive' & social$pin_code_name != 'Odilon' & social$pin_code_name != 'Sonne' & social$pin_code_name != 'Mamy',]
-sub		<- social[social$category == 'Submissive' & social$pin_code_name != 'Odilon' & social$pin_code_name != 'Sahoby' & social$pin_code_name != 'Sonne' & social$pin_code_name != 'Mamy',]
-info		<- social[social$category == 'Information' & social$pin_code_name == 'Meredith',]
-grt		<- social[social$behavior == 'Greet' & (social$pin_code_name == 'Onja' | social$pin_code_name == 'Hasina' | social$pin_code_name == 'Diary'),]
-socialSub	<- rbind(affil, agg, sub, info, grt)
 
 cleanData	<- function(data, cleanFile, errorFile){
 	### This function takes a dataset (data), an cleanedFile (can be empty), an error file (can be empty)
@@ -124,9 +77,6 @@ cleanData	<- function(data, cleanFile, errorFile){
 	return(list(cleanFile, errorFile))
 }
 
-listFocals	<- unique(socialSub$focal_start_chron)
-cleanedTest	<- cleanData(test, cleanedData, errorFile)
-
 cleanAllFocalData	<- function(data, cleanFile, errorFile){
 	### This function takes in an entire database, seperates it out by focal, cleans each focal individually, and returns the clean and error files
 	### Data is a dataset from AO (can contain multiple focals of data)
@@ -147,13 +97,3 @@ cleanAllFocalData	<- function(data, cleanFile, errorFile){
 	}
 	return(output)
 }
-
-cleanedData	<- data.frame()
-errorFile	<- data.frame()
-
-socialClean	<- cleanAllFocalData(socialSub, cleanedData, errorFile)
-write.csv(socialClean[[1]], 'socialClean6.csv')
-write.csv(socialClean[[2]], 'socialError6.csv')
-
-dbDisconnect(con)
-dbUnloadDriver(drv)
