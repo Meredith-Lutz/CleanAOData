@@ -4,9 +4,9 @@ library(stringr)
 #library(data.table)
 
 drv <- dbDriver("PostgreSQL")
-con <- dbConnect(drv, dbname = "p_verreauxi_2019_v1_3",
-                 host = "localhost", port = 5433,
-                 user = "postgres", password = "Animalbehavior1#")
+con <- dbConnect(drv, dbname = "verreauxi_2019",
+                 host = "localhost", port = 5432,
+                 user = "postgres", password = "postgres")
 
 focalData 	<- dbGetQuery(con, "SELECT * from main_tables.all_focal_data_view")
 scanData	<- dbGetQuery(con, "SELECT * from main_tables.all_scan_data_view")
@@ -44,6 +44,7 @@ dyadIDs	<- apply(as.matrix(focalData[, c('actor', 'subject')]), 1, createID)
 focalDataID	<- cbind(focalData, dyadIDs)
 
 focalDataNoNA	<- focalDataID[is.na(focalDataID$actor) == FALSE,]
+test			<- focalDataNoNA[focalDataNoNA$focal_start_chron == listFocals[2],]
 
 cleanData	<- function(data, cleanFile, errorFile, byHand){
 	### This function takes a dataset (data), an cleanedFile (can be empty), an error file (can be empty)
@@ -54,87 +55,69 @@ cleanData	<- function(data, cleanFile, errorFile, byHand){
 	print(dim(cleanFile))
 	print(dim(errorFile))
 	print(dim(byHand))
-	behaviors	<- unique(data$behavior)
+
+	behaviors	<- sort(unique(data$behavior))
+	#Need to do within 1m and in contact before all the app/with (in order to remove all lines, so this makes sure the order of behaviors is like that
+	if('Within 1m' %in% behaviors){
+		behaviors	<- c('Within 1m', behaviors[behaviors != 'Within 1m'])
+	}
+
 	durBehaviors	<- c('Greet', 'Groom', 'Mutual Groom', 'Invite to groom', 'Play', 'Clasp', 'Mount', 'Chase', 'Chatter', 'Fight', 'In contact', 'Within 1m')
 	matchBehaviors	<- c('Approach 1m', 'Approach Contact', 'Withdraw 1m', 'Withdraw >1m')
 	events	<- c('Bite', 'Cuff', 'Feign to cuff', 'Food Rob', 'Grab', 'Head toss', 'Lunge', 'Nose jab', 'Snap at', 'Supplant', 'Flee <2m', 'Flee >2m', 'Grimace', 'Tail curl')
+	
 	appWith	<- data.frame()
+
 	print('Cleaning')
+
 	for(i in behaviors){
+		#First match all events
+		#Then deal with normal behavior variables
+		#Then deal with within 1m and in contact
+		#Then deal with app 1m, w>1m, app cnt, withdraw 1m
+
 		sub	<- data[data$behavior == i,]
 		print(i)
-		if(i == 'Within 1m' | i == 'In contact'){ #Pull the withdraw lines from all within contacts
-			endTimes	<- sub[sub$start_stop == 'Stop', c('behavior_time')]
-			#print(endTimes)
-			focalWithdraws	<- data[which(data$behavior == 'Withdraw 1m'| data$behavior == 'Withdraw >1m'),]
-			allWith		<- data.frame()
-			for(q in endTimes){
-				withdraw1	<- data[data$behavior_time == q & data$behavior == 'Withdraw 1m',]
-				withdrawG1 	<- data[which(data$behavior_time == q & data$behavior == 'Withdraw >1m'),]
-				withdraws	<- rbind(withdraw1, withdrawG1)
-			#	print(dim(withdraws))
-			#	print(colnames(withdraws))
-				allWith	<- rbind(allWith, withdraws)
-			}
-			#print(length(endTimes))
-			#print(dim(allWith))
-			if(length(endTimes) != dim(allWith)[1]){
-				errorChunk	<- rbind(sub, withdraws)
-				errorCode	<- rep(12, dim(errorChunk)[1])
-				errorChunk	<- cbind(errorChunk, errorCode)
-				errorFile	<- rbind(errorFile, errorChunk)
-			}
-			if(length(endTimes) == dim(allWith)[1]){
-			#	print(dim(sub))
-				#print(colnames(sub))
-				#print(colnames(allWith))
-				sub	<- rbind(sub, allWith)
-			}
-		}
-	#	print(head(sub))
-		if(sub[1,]$behavior %in% events){ #Event
+		
+		#Handles all of the events
+		if(sub[1,]$behavior %in% events){ 
 			print(paste(i, 'is an event'))
-			startTime	<- sub$behavior_time ##Fix this line
-			#print(startTime)
-			stopTime	<- sub$behavior_time ##Fix this line
-			#print(stopTime)
-			#duration	<- as.numeric(stopTime - startTime)*24*60*60
+			startTime		<- sub$behavior_time
+			stopTime		<- sub$behavior_time
 			cleanedChunk	<- cbind(sub, startTime, stopTime)
-			cleanFile	<- rbind(cleanFile, cleanedChunk)
-			#print(cleanFile[,c('behavior_time', 'behavior', 'tree_number', 'dyadIDs', 'startTime', 'stopTime', 'duration')])
-
+			cleanFile		<- rbind(cleanFile, cleanedChunk)
 		}
-		if(sub[1,]$behavior %in% durBehaviors){ #Behavior already has start stops, and just needs to be matched
+
+		#Handles all of the nomral matching behaviors
+		if(sub[1,]$behavior %in% durBehaviors){ 
 			dyads	<- unique(sub$dyadIDs)
 			print(paste(i, 'was social'))
-			for(k in dyads){
+			for(k in dyads){ #Match on a dyad by dyad basis
 				subDyad	<- sub[sub$dyadIDs == k,] #Just the data for that dyad and behav
+				subDyad	<- subDyad[order(subDyad$behavior_time),] #Order it
 				nStart	<- dim(subDyad[subDyad$start_stop == 'Start',])[1]
 				nStop		<- dim(subDyad[subDyad$start_stop == 'Stop',])[1]
 				if(nStart == nStop){ #Everything is started and stopped
-					print(paste(k, 'was started/stopped appropriately'))
-					withdraws2	<- subDyad[which(subDyad$behavior == 'Withdraw 1m' | subDyad$behavior == 'Withdraw >1m'),]
-					withdraws2$startTime	<- withdraws2$behavior_time
-					withdraws2$stopTime	<- withdraws2$behavior_time
-					subBehav	<- subDyad[which(subDyad$behavior == i),]
-					subBehav	<- subBehav[order(subBehav$behavior_time),]
-					#print(dim(subBehav))
-					#print(subBehav)
-					for(m in 1:(dim(subBehav)[1]/2)){
-						cleanedLine	<- subBehav[c(2*m - 1),]
-						startTime	<- subBehav[c(2*m - 1),]$behavior_time ##Fix these lines
-						#print(startTime)
-						stopTime	<- subBehav[c(2*m),]$behavior_time ##Fix these lines
-						#print(stopTime)
-						#duration	<- as.numeric(stopTime - startTime)*24*60*60
-						cleanedLine	<- cbind(cleanedLine, startTime, stopTime) #Fix
-						#print(dim(cleanedLine))
-						#print(dim(cleanFile))
-						#print(colnames(cleanFile))
-						cleanFile	<- rbind(cleanFile, cleanedLine)
+					#Double check that the starts/stops are in the right order,
+					hypotheticalStarts	<- subDyad[seq(1, dim(subDyad)[1], by = 2), 15]
+					if(!'Stop' %in% hypotheticalStarts){ 
+						print(paste(k, 'was started/stopped appropriately'))
+						for(m in 1:(dim(subDyad)[1]/2)){
+							cleanedLine	<- subDyad[c(2*m - 1),]
+							startTime	<- subDyad[c(2*m - 1),]$behavior_time
+							stopTime	<- subDyad[c(2*m),]$behavior_time
+							cleanedLine	<- cbind(cleanedLine, startTime, stopTime)
+							#print(dim(cleanedLine))
+							#print(dim(cleanFile))
+							#print(colnames(cleanFile))
+							cleanFile	<- rbind(cleanFile, cleanedLine)
+						}
 					}
-					if(i == 'Within 1m'| i == 'In contact'){
-						cleanFile	<- rbind(cleanFile, withdraws2)
+					#There are the right number of starts/stops, but they are in the wrong order
+					else{
+						errorCode	<- rep(3, length = dim(subDyad)[1])
+						errorChunk	<- cbind(subDyad, errorCode)
+						errorFile	<- rbind(errorFile, errorChunk)
 					}
 				}
 				if(nStart > nStop){
@@ -150,8 +133,57 @@ cleanData	<- function(data, cleanFile, errorFile, byHand){
 					errorFile	<- rbind(errorFile, errorChunk)		
 				}
 			}
-			#print(cleanFile[,c('behavior_time', 'behavior', 'tree_number', 'dyadIDs', 'startTime', 'stopTime', 'duration')])
 		}
+
+		#Handles all within 1m/in contact by pulling out withdraw lines from them
+		if(i == 'Within 1m' | i == 'In contact'){
+			#Pulls endtimes from the within 1m/in contact 
+			endTimes		<- sub[sub$start_stop == 'Stop', c('behavior_time')]
+
+			#Pulls all possible withdraw lines 
+			focalWithdraws	<- data[which(data$behavior == 'Withdraw 1m'| data$behavior == 'Withdraw >1m'),]
+
+			#Withdraw lines that match a within 1m or in contact are collected in allWith 
+			allWith		<- data.frame()
+
+			#Finds the withdraws that are matched
+			for(q in endTimes){ 
+				withdraw1	<- data[data$behavior_time == q & data$behavior == 'Withdraw 1m',]
+				withdrawG1 	<- data[which(data$behavior_time == q & data$behavior == 'Withdraw >1m'),]
+				withdraws	<- rbind(withdraw1, withdrawG1)
+				allWith	<- rbind(allWith, withdraws)
+				allWith$startTime	<- allWith$behavior_time
+				allWith$stopTime	<- allWith$behavior_time
+			}
+		
+			#If we didn't find them all, error
+			if(length(endTimes) != dim(allWith)[1]){
+				errorChunk	<- rbind(sub, withdraws)
+				errorCode	<- rep(12, dim(errorChunk)[1])
+				errorChunk	<- cbind(errorChunk, errorCode)
+				errorFile	<- rbind(errorFile, errorChunk)
+			}
+
+			#If we did find them then add them to the subset and remove from larger dataset
+			if(length(endTimes) == dim(allWith)[1]){
+				for(m in 1:(dim(sub)[1]/2)){
+					cleanedLine	<- sub[c(2*m - 1),]
+					startTime	<- sub[c(2*m - 1),]$behavior_time
+					stopTime	<- sub[c(2*m),]$behavior_time
+					cleanedLine	<- cbind(cleanedLine, startTime, stopTime)
+					#print(dim(cleanedLine))
+					#print(dim(cleanFile))
+					#print(colnames(cleanFile))
+					cleanFile	<- rbind(cleanFile, cleanedLine)
+				}
+				#Add withdraw lines to cleaned File
+				cleanFile	<- rbind(cleanFile, allWith)
+				#Remove the withdraw lines from the larger dataset
+				data	<- data[!(data$behavior_time %in% allWith$behavior_time & data$behavior %in% allWith$behavior),]
+			}
+		}
+		
+		#Stick all the appWith lines 
 		if(sub[1,]$behavior %in% matchBehaviors){#behavior was an approach/withdraw situation
 			appWith	<- rbind(appWith, sub)
 		}
@@ -161,31 +193,24 @@ cleanData	<- function(data, cleanFile, errorFile, byHand){
 
 	dyads	<- unique(appWith$dyadIDs) #break it down by dyads, NEED TO BE ABOUT WITH
 	for(d in dyads){
-	#	print(dyads)
-		print(d)
+		print(paste('Working on cleaning approaches + withdraws for', d))
 		subset	<- appWith[appWith$dyadIDs == d,]
-	#	print(dim(subset))
 		app1		<- subset[subset$behavior == 'Approach 1m',]
 		appcnt	<- subset[subset$behavior == 'Approach Contact',]
 		with1		<- subset[subset$behavior == 'Withdraw 1m',]
 		withG1	<- subset[subset$behavior == 'Withdraw >1m',]
-	#	print(dim(app1))
-	#	print(dim(appcnt))
-	#	print(dim(with1))
-	#	print(dim(withG1))
-		if(dim(appcnt)[1] == 0 & dim(with1)[1] == 0){ #There were no contacts
+
+		#Handle case were there were no contacts, so should just be app1/w>1
+		if(dim(appcnt)[1] == 0 & dim(with1)[1] == 0){ 
 			if(dim(app1)[1] == dim(withG1)[1]){ #Withdraws and approaches line up
-				print('no contacts approach and withdraw line up')
+				print('no contacts and approach and withdraw line up')
 				subDyad	<- rbind(app1, withG1)
 				subDyad	<- subDyad[order(subDyad$behavior_time),]
-			for(m in 1:(dim(subDyad)[1]/2)){
+				for(m in 1:(dim(subDyad)[1]/2)){
 					cleanedLine	<- subDyad[c(2*m - 1, 2*m),]
-					startTime	<- subDyad[c(2*m - 1, 2*m),]$behavior_time ##Fix these lines
-					#print(startTime)
-					stopTime	<- rep(subDyad[c(2*m),]$behavior_time) ##Fix these lines
-					#print(stopTime)
-					#duration	<- as.numeric(stopTime - startTime)*24*60*60
-					cleanedLine	<- cbind(cleanedLine, startTime, stopTime) #Fix
+					startTime	<- subDyad[c(2*m - 1, 2*m),]$behavior_time
+					stopTime	<- subDyad[c(2*m),]$behavior_time
+					cleanedLine	<- cbind(cleanedLine, startTime, stopTime)
 					cleanFile	<- rbind(cleanFile, cleanedLine)
 				}
 			}
@@ -200,18 +225,15 @@ cleanData	<- function(data, cleanFile, errorFile, byHand){
 			if(dim(app1)[1] < dim(withG1)[1]){ #Fewer approaches than withdraws
 				print('more withdraws than approach')
 				subDyad	<- rbind(app1, withG1)
-	#			print(dim(subDyad))
 				subDyad	<- subDyad[order(subDyad$behavior_time),]
-	#			print('subDyad reorderd')
 				errorCode	<- data.frame(errorCode = rep(2, length = dim(subDyad)[1]))
-	#			print(errorCode)
 				errorChunk	<- cbind(subDyad, errorCode)
 				errorFile	<- rbind(errorFile, errorChunk)
-				print('finished adding to error more with than app')
 			}
-	#		print('exited case')
 		}
-		if(dim(appcnt)[1] == 0 & dim(with1)[1] != 0){ #There were withdraw 1ms but no contacts, missing contact
+		
+		#Handle case where there is withdraw 1m but no contact, missing contact
+		if(dim(appcnt)[1] == 0 & dim(with1)[1] > 0){ 
 			print('There were withdraw 1ms but no contacts, missing contact')
 			subDyad	<- rbind(app1, withG1, with1)
 			subDyad	<- subDyad[order(subDyad$behavior_time),]
@@ -219,6 +241,8 @@ cleanData	<- function(data, cleanFile, errorFile, byHand){
 			errorChunk	<- cbind(subDyad, errorCode)
 			errorFile	<- rbind(errorFile, errorChunk)
 		}
+		
+		#Handle case where there is an approach contact, but not withdraw 1m
 		if(dim(appcnt)[1] > 0 & dim(with1)[1] == 0){ #There was a contact, but no withdraw 1m
 			print('There was a contact, but no withdraw 1m')
 			subDyad	<- rbind(app1, withG1, appcnt)
@@ -254,25 +278,24 @@ cleanData	<- function(data, cleanFile, errorFile, byHand){
 				}
 				else{ #if there are no errors at all, can add the appropriate times
 					print('no errors adding stop times')
-					temp	<- rbind(temp,subDyad[p,])
+					temp	<- rbind(temp, subDyad[p,])
 					if(dim(temp)[1] == dim(subDyad)[1]){ #There were no errors in any line
 						for(y in 2:dim(temp)[1]){
 							if(temp[y,]$behavior == 'Withdraw >1m'){ #Find the appropriate stop lines
 								if(temp[y-1,]$behavior == 'Approach 1m'){ #app 1m/W>1m
 									cleanedLines	<- temp[c(y-1, y),]
 									startTimes		<- temp[c(y-1,y),]$behavior_time
-									stopTimes		<- rep(temp[y,]$behavior_time, 2) ##Fix these lines
-									#durations		<- as.numeric(stopTime - startTime)*24*60*60
-									cleanedLines	<- cbind(cleanedLines, startTimes, stopTimes) #Fix
+									stopTimes		<- rep(temp[y,]$behavior_time, 2) 
+									cleanedLines	<- cbind(cleanedLines, startTimes, stopTimes)
 									cleanFile		<- rbind(cleanFile, cleanedLines)
 								}
 								if(temp[(y-1),]$behavior == 'Approach Contact'){
 									if(y > 2 & temp[y-2,]$behavior == 'Approach 1m'){ #app 1/app cnt/w>1
 										cleanedLines	<- temp[c(y-2:y),]
 										startTimes		<- temp[c(y-2:y),]$behavior_time
-										stopTimes		<- rep(temp[y,]$behavior_time, 3) ##Fix these lines
+										stopTimes		<- rep(temp[y,]$behavior_time, 3)
 										#durations		<- as.numeric(stopTime - startTime)*24*60*60
-										cleanedLines	<- cbind(cleanedLines, startTimes, stopTimes) #Fix
+										cleanedLines	<- cbind(cleanedLines, startTimes, stopTimes) 
 										cleanFile		<- rbind(cleanFile, cleanedLines)
 									}
 									if(y == 2){#app cnt/w>1m at beginning of focal
@@ -329,7 +352,9 @@ cleanData	<- function(data, cleanFile, errorFile, byHand){
 					}
 				} #close else
 			}#clos error checking
-		}#close case with 	
+		}#close case with 
+
+			
 		if(dim(appcnt)[1] > 0 & dim(with1)[1] > 0){ #There was a contact, and withdraw 1m
 			print('there was a contact and a withdraw 1m')
 			subDyad	<- rbind(app1, withG1, appcnt, with1)
@@ -511,7 +536,7 @@ cleanData	<- function(data, cleanFile, errorFile, byHand){
 	return(list(cleanFile, errorFile, byHand))
 }
 
-listFocals	<- unique(focalDataID$focal_start_chron)
+listFocals	<- unique(focalDataNoNA$focal_start_chron)
 cleanedTest	<- cleanData(test, cleanedData, errorFile)
 
 cleanAllFocalData	<- function(data, cleanFile, errorFile, byHand){

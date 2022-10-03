@@ -38,3 +38,7 @@ aggSub	<- agg[agg$pin_code_name == 'Meredith' | agg$pin_code_name == 'Hasina',]
 
 aggSimp	<- aggSub[,c(1:14, 23:27)]
 write.csv(aggSimp, 'aggressionSubmission.csv')
+
+focalData	<- focalData[focalData$category %in% c('Affilative', 'Aggressive', 'Information', 'Submissive'),]
+focalDataSimp	<- focalData[, c(1, 4:15)]
+write.csv(focalDataSimp, 'focalData.csv')

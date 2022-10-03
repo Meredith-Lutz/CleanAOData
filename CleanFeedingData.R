@@ -95,7 +95,6 @@ cleanData	<- function(data, cleanFile, errorFile){
 }
 
 listFocals	<- unique(feedingNoOdilon$focal_start_chron)
-cleanedTest	<- cleanData(test, cleanedData, errorFile)
 
 cleanAllFocalData	<- function(data, cleanFile, errorFile){
 	### This function takes in an entire database, seperates it out by focal, cleans each focal individually, and returns the clean and error files
